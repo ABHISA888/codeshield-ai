@@ -3,9 +3,9 @@ import { Shield, Github } from 'lucide-react';
 
 const Layout = ({ children }) => {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50">
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-black to-gray-800">
       {/* Header */}
-      <header className="bg-white shadow-md border-b border-gray-200">
+      <header className="bg-gray-900/80 backdrop-blur-sm shadow-md border-b border-gray-700">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             {/* Logo */}
@@ -14,10 +14,10 @@ const Layout = ({ children }) => {
                 <Shield className="w-8 h-8 text-white" />
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-gray-900">
+                <h1 className="text-2xl font-bold text-white">
                   CodeShield AI
                 </h1>
-                <p className="text-sm text-gray-600">
+                <p className="text-sm text-gray-400">
                   Secure Coding Knowledge Base
                 </p>
               </div>
@@ -25,23 +25,23 @@ const Layout = ({ children }) => {
 
             {/* Nav Links */}
             <nav className="flex items-center space-x-6">
-              
+              <a
                 href="/"
-                className="text-gray-700 hover:text-blue-600 font-medium"
+                className="text-gray-300 hover:text-blue-400 font-medium transition-colors"
               >
                 Home
               </a>
-              
+              <a
                 href="#docs"
-                className="text-gray-700 hover:text-blue-600 font-medium"
+                className="text-gray-300 hover:text-blue-400 font-medium transition-colors"
               >
                 Documents
               </a>
-              
+              <a
                 href="https://github.com"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center space-x-2 text-gray-700 hover:text-blue-600"
+                className="flex items-center space-x-2 text-gray-300 hover:text-blue-400 transition-colors"
               >
                 <Github className="w-5 h-5" />
                 <span>GitHub</span>
