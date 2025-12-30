@@ -1,57 +1,8 @@
-const SecurityPractice = require('../models/SecurityPractice');
 const pdfParse = require('pdf-parse');
 const fs = require('fs').promises;
-const OpenAI = require('openai');
-
-// Lazy initialization of OpenAI client
-const getOpenAIClient = () => {
-  if (!process.env.OPENAI_API_KEY) {
-    return null;
-  }
-  return new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY
-  });
-};
-
-// Generate embedding using OpenAI
-const generateEmbedding = async (text) => {
-  const openai = getOpenAIClient();
-  if (!openai) {
-    // Fallback: return a simple hash-based embedding for demo
-    console.warn('OpenAI API key not set. Using fallback embeddings.');
-    return Array(1536).fill(0).map(() => Math.random());
-  }
-  
-  try {
-    const response = await openai.embeddings.create({
-      model: 'text-embedding-3-small',
-      input: text,
-    });
-    return response.data[0].embedding;
-  } catch (error) {
-    console.error('Error generating embedding:', error);
-    return Array(1536).fill(0).map(() => Math.random());
-  }
-};
-
-// Chunk text by meaning (simple sentence-based chunking)
-const chunkContent = (text, maxChunkSize = 500) => {
-  const sentences = text.split(/[.!?]\s+/);
-  const chunks = [];
-  let currentChunk = '';
-
-  for (const sentence of sentences) {
-    if ((currentChunk + sentence).length > maxChunkSize && currentChunk) {
-      chunks.push(currentChunk.trim());
-      currentChunk = sentence;
-    } else {
-      currentChunk += (currentChunk ? '. ' : '') + sentence;
-    }
-  }
-  if (currentChunk) chunks.push(currentChunk.trim());
-
-  return chunks;
-};
+const { chunkContent } = require('../utils/chunker');
+const { embedText } = require('../services/openRouterService');
+const { insertKnowledgeChunks } = require('../services/vectorSearchService');
 
 // Extract metadata from content
 const extractMetadata = (content, filename) => {
@@ -98,66 +49,87 @@ const extractMetadata = (content, filename) => {
 
 const uploadController = async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded' });
-    }
+    let rawText = '';
+    let languageHint = req.body.language || 'all';
+    let categoryHint = req.body.category || 'policy';
+    let source = req.body.source || 'manual-upload';
 
-    const file = req.file;
-    let text = '';
+    // Support either raw text (JSON) or file upload (PDF/MD/TXT)
+    if (req.body.text && typeof req.body.text === 'string') {
+      rawText = req.body.text;
+    } else if (req.file) {
+      const file = req.file;
+      source = `file:${file.originalname}`;
 
-    // Step 1: Extract text based on file type
-    if (file.mimetype === 'application/pdf') {
-      const dataBuffer = await fs.readFile(file.path);
-      const pdfData = await pdfParse(dataBuffer);
-      text = pdfData.text;
-    } else if (file.mimetype === 'text/markdown' || file.originalname.endsWith('.md')) {
-      text = await fs.readFile(file.path, 'utf-8');
+      if (file.mimetype === 'application/pdf') {
+        const dataBuffer = await fs.readFile(file.path);
+        const pdfData = await pdfParse(dataBuffer);
+        rawText = pdfData.text;
+      } else if (
+        file.mimetype === 'text/markdown' ||
+        file.mimetype === 'text/plain' ||
+        file.originalname.endsWith('.md') ||
+        file.originalname.endsWith('.txt')
+      ) {
+        rawText = await fs.readFile(file.path, 'utf-8');
+      } else {
+        return res.status(400).json({
+          error:
+            'Unsupported file type. Only PDF, Markdown (.md) and Text (.txt) files are supported.',
+        });
+      }
+
+      // Ensure temp file is removed
+      await fs.unlink(file.path).catch(() => {});
     } else {
-      return res.status(400).json({ error: 'Unsupported file type. Only PDF and Markdown files are supported.' });
+      return res.status(400).json({ error: 'No text or file provided' });
     }
 
-    // Step 2: Chunk the content
-    const chunks = chunkContent(text);
+    if (!rawText || !rawText.trim()) {
+      return res.status(400).json({ error: 'Uploaded content is empty' });
+    }
 
-    // Step 3: Process each chunk
-    const results = [];
-    for (const chunk of chunks) {
-      if (chunk.length < 50) continue; // Skip very short chunks
+    // Step 1: Chunk content semantically
+    const baseMetadata = {
+      language: languageHint,
+      category: categoryHint,
+      source,
+    };
+    const chunkDocs = chunkContent(rawText, baseMetadata);
 
-      const metadata = extractMetadata(chunk, file.originalname);
+    // Step 2: Embed each chunk and prepare documents
+    const enrichedChunks = [];
+    for (const chunk of chunkDocs) {
+      if (!chunk.content || chunk.content.length < 50) continue;
 
-      // Step 4: Generate embedding
-      const embedding = await generateEmbedding(chunk);
+      const inferred = extractMetadata(chunk.content, source);
 
-      // Step 5: Save to database
-      const practice = new SecurityPractice({
-        content: chunk,
-        embedding: embedding,
-        language: metadata.language,
-        topic: metadata.topic,
-        type: metadata.type,
-        severity: metadata.severity,
-        source: file.originalname,
+      const embedding = await embedText(chunk.content);
+
+      enrichedChunks.push({
+        content: chunk.content,
+        embedding,
+        language: inferred.language || baseMetadata.language,
+        category: inferred.topic || baseMetadata.category,
+        source: baseMetadata.source,
         metadata: {
-          reason: metadata.type === 'forbidden' ? 'Violates company security policy' : null
-        }
-      });
-
-      await practice.save();
-      results.push({
-        content: chunk.substring(0, 100) + '...',
-        type: metadata.type,
-        topic: metadata.topic
+          chunkIndex: chunk.chunkIndex,
+          totalChunks: chunk.totalChunks,
+          tokenCount: chunk.tokenCount,
+          severity: inferred.severity,
+          type: inferred.type,
+        },
       });
     }
 
-    // Clean up uploaded file
-    await fs.unlink(file.path);
+    await insertKnowledgeChunks(enrichedChunks);
 
     res.json({
-      message: 'File processed successfully',
-      chunksProcessed: results.length,
-      results: results
+      message: 'Document ingested successfully',
+      chunksProcessed: enrichedChunks.length,
+      source,
+      language: languageHint,
+      category: categoryHint,
     });
   } catch (error) {
     console.error('Upload error:', error);

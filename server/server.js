@@ -19,6 +19,7 @@ app.use(express.urlencoded({ extended: true }));
 // Routes
 app.use('/api/query', require('./routes/queryRoutes'));
 app.use('/api/upload', require('./routes/uploadRoutes'));
+app.use('/api/github', require('./routes/githubRoutes'));
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

@@ -1,55 +1,62 @@
 const mongoose = require('mongoose');
 
-const securityPracticeSchema = new mongoose.Schema({
-  content: {
-    type: String,
-    required: true,
-    index: true
+/**
+ * Security knowledge document schema
+ * Backed by MongoDB Atlas Vector Search index: `vector_index`
+ *
+ * NOTE: The actual vector index is configured in Atlas UI using:
+ *  - collection: security_knowledge
+ *  - path: embedding
+ *  - numDimensions: 1536
+ *  - similarity: cosine
+ */
+const securityKnowledgeSchema = new mongoose.Schema(
+  {
+    content: {
+      type: String,
+      required: true,
+      index: true,
+      trim: true,
+    },
+    // 1536-dim embedding vector (text-embedding-3-small)
+    embedding: {
+      type: [Number],
+      required: true,
+      validate: {
+        validator: (v) => Array.isArray(v) && v.length === 1536,
+        message: 'Embedding must be a 1536-dimensional vector',
+      },
+    },
+    language: {
+      type: String,
+      required: true,
+      default: 'all',
+      index: true,
+    },
+    category: {
+      type: String,
+      required: true,
+      index: true,
+    },
+    source: {
+      type: String,
+      required: true,
+      index: true,
+    },
+    metadata: {
+      type: Object,
+      default: {},
+    },
+    createdAt: {
+      type: Date,
+      default: Date.now,
+    },
   },
-  embedding: {
-    type: [Number],
-    required: true
-  },
-  language: {
-    type: String,
-    required: true,
-    enum: ['all', 'javascript', 'python', 'go', 'java', 'typescript', 'node.js'],
-    default: 'all',
-    index: true
-  },
-  topic: {
-    type: String,
-    required: true,
-    index: true
-  },
-  type: {
-    type: String,
-    required: true,
-    enum: ['secure', 'forbidden'],
-    index: true
-  },
-  severity: {
-    type: String,
-    enum: ['critical', 'warning', 'info'],
-    default: 'warning'
-  },
-  source: {
-    type: String,
-    required: true
-  },
-  metadata: {
-    headers_used: [String],
-    reason: String,
-    approved_alternative: String
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now
+  {
+    collection: 'security_knowledge',
   }
-});
+);
 
-// Create vector index for embeddings (MongoDB Atlas Vector Search)
-securityPracticeSchema.index({ embedding: '2dsphere' });
+module.exports = mongoose.model('SecurityKnowledge', securityKnowledgeSchema);
 
-module.exports = mongoose.model('SecurityPractice', securityPracticeSchema);
 
